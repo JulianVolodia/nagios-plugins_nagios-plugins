@@ -27,7 +27,7 @@
 *****************************************************************************/
 
 const char *progname = "check_by_ssh";
-const char *copyright = "2000-2014";
+const char *copyright = "2000-";
 const char *email = "devel@nagios-plugins.org";
 
 #include "common.h"
@@ -107,21 +107,26 @@ main (int argc, char **argv)
 
 	/* UNKNOWN or worse if (non-skipped) output found on stderr */
 	if(chld_err.lines > skip_stderr) {
-		printf (_("Remote command execution failed: %s\n"),
-		        chld_err.line[skip_stderr]);
-		return max_state_alt(result, STATE_UNKNOWN);
+		result = max_state_alt(result, STATE_UNKNOWN);
+		printf (_("%s - check_by_ssh: Remote command execution failed: %s\n"),
+		        state_text(result), chld_err.line[skip_stderr]);
+		return result;
 	}
 
 	/* this is simple if we're not supposed to be passive.
 	 * Wrap up quickly and keep the tricks below */
 	if(!passive) {
+		/* UNKNOWN if result exceed nagios plugins conventions,
+		 * such as ssh or other remote execution error */
+		int chld_return_code = result;
+		result = min(result, STATE_UNKNOWN);
 		if (chld_out.lines > skip_stdout)
 			for (i = skip_stdout; i < chld_out.lines; i++)
 				puts (chld_out.line[i]);
 		else
 			printf (_("%s - check_by_ssh: Remote command '%s' returned status %d\n"),
-			        state_text(result), remotecmd, result);
-		return result; 	/* return error status from remote command */
+			        state_text(result), remotecmd, chld_return_code);
+		return result;
 	}
 
 
@@ -299,6 +304,16 @@ process_arguments (int argc, char **argv)
 				skip_stderr = atoi (optarg);
 			break;
 		case 'o':									/* Extra options for the ssh command */
+
+			/* Don't allow the user to run commands local to the nagios server, unless they decide otherwise at compile time. */
+#ifndef HAVE_UNRESTRICTED_SSH_OPTIONS
+			if (   strcasestr(optarg, "ProxyCommand") != NULL
+				|| strcasestr(optarg, "PermitLocalCommand") != NULL
+				|| strcasestr(optarg, "LocalCommand") != NULL) {
+				break;
+			}
+#endif
+
 			comm_append("-o");
 			comm_append(optarg);
 			break;
@@ -425,7 +440,6 @@ print_help (void)
   printf ("    %s\n", _("Tell ssh to use this configfile [optional]"));
   printf (" %s\n","-q, --quiet");
   printf ("    %s\n", _("Tell ssh to suppress warning and diagnostic messages [optional]"));
-	printf (UT_WARN_CRIT);
 	printf (UT_CONN_TIMEOUT, DEFAULT_SOCKET_TIMEOUT);
 	printf (UT_VERBOSE);
 	printf("\n");

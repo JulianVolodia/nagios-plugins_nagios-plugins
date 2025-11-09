@@ -7,7 +7,7 @@
 /* The purpose of this package is to provide safer alternatives to C
 functions that might otherwise be vulnerable to hacking. This
 currently includes a standard suite of validation routines to be sure
-that an string argument acually converts to its intended type and a
+that an string argument actually converts to its intended type and a
 suite of string handling routine that do their own memory management
 in order to resist overflow attacks. In addition, a few functions are
 provided to standardize version and error reporting across the entire
@@ -79,8 +79,12 @@ char *strpcat (char *, const char *, const char *);
 int xvasprintf (char **strp, const char *fmt, va_list ap);
 int xasprintf (char **strp, const char *fmt, ...);
 
+
+int min_state (int a, int b);
 int max_state (int a, int b);
 int max_state_alt (int a, int b);
+int min_state (int a, int b);
+int min_state_alt (int a, int b);
 
 void usage (const char *) __attribute__((noreturn));
 void usage2(const char *, const char *) __attribute__((noreturn));
@@ -96,29 +100,17 @@ int parse_timeout_string (char *timeout_str);
 #define max(a,b) (((a)>(b))?(a):(b))
 #define min(a,b) (((a)<(b))?(a):(b))
 
-char *perfdata (const char *,
- long int,
- const char *,
- int,
- long int,
- int,
- long int,
- int,
- long int,
- int,
- long int);
+char *perfdata (const char *, long int, const char *, int, long int,
+                int, long int, int, long int, int, long int);
 
-char *fperfdata (const char *,
- double,
- const char *,
- int,
- double,
- int,
- double,
- int,
- double,
- int,
- double);
+char *fperfdata (const char *, double, const char *, int, double,
+                 int, double, int, double, int, double);
+
+char *sperfdata (const char *, double, const char *, char *, char *,
+                 int, double, int, double);
+
+char *sperfdata_int (const char *, int, const char *, char *, char *,
+                     int, int, int, int);
 
 /* string case changes */
 void strntoupper (char * test_char, int size);

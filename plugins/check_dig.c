@@ -57,6 +57,7 @@ char *dns_server = NULL;
 char *dig_args = "";
 char *query_transport = "";
 int verbose = FALSE;
+int exact = FALSE;
 int server_port = DEFAULT_PORT;
 int number_tries = DEFAULT_TRIES;
 double warning_interval = UNDEFINED;
@@ -70,7 +71,7 @@ main (int argc, char **argv)
   output chld_out, chld_err;
   char *msg = NULL;
   size_t i;
-  char *t;
+  char *t, *tt, *ex;
   long microsec;
   double elapsed_time;
   int result = STATE_UNKNOWN;
@@ -100,13 +101,10 @@ main (int argc, char **argv)
   alarm (timeout_interval);
   gettimeofday (&tv, NULL);
 
+  ex = ( (expected_address != NULL) ? expected_address : query_address );
   if (verbose) {
     printf ("%s\n", command_line);
-    if(expected_address != NULL) {
-      printf (_("Looking for: '%s'\n"), expected_address);
-    } else {
-      printf (_("Looking for: '%s'\n"), query_address);
-    }
+    printf (_("Looking for: '%s' length %lu\n"), ex, strlen( ex ));
   }
 
   /* run the command */
@@ -117,21 +115,45 @@ main (int argc, char **argv)
 
   for(i = 0; i < chld_out.lines; i++) {
     /* the server is responding, we just got the host name... */
-    if (strstr (chld_out.line[i], ";; ANSWER SECTION:")) {
 
-      /* loop through the whole 'ANSWER SECTION' */
+    /* ";; ANSWER SECTION:" is an exact, full-line match: */
+
+    if (strcmp (chld_out.line[i], ";; ANSWER SECTION:") == 0) {
+
+      /* loop through the whole 'ANSWER SECTION', which ends with a zero-length line */
+
       for(; i < chld_out.lines; i++) {
-        /* get the host address */
         if (verbose)
           printf ("%s\n", chld_out.line[i]);
 
-        if (strcasestr (chld_out.line[i], (expected_address == NULL ? query_address : expected_address)) != NULL) {
-          msg = chld_out.line[i];
-          result = STATE_OK;
+        if (strlen(chld_out.line[i]) == 0) /* end of answer section */
+          break;
 
-          /* Translate output TAB -> SPACE */
-          t = msg;
-          while ((t = strchr(t, '\t')) != NULL) *t = ' ';
+        /* drill's answer section is tab-delimited, change them to spaces */
+
+        t = chld_out.line[i];
+        while ((tt = strchr(t, '\t')) != NULL) {
+          *tt = ' ';	/* TAB -> SPACE */
+          t = ++tt;	/* t -> remainder of string */
+        }
+
+        tt = t;         /* tt points to the rightmost tab-delimited token */
+
+        /* left match: does ex appear, followed by ". " ? */
+        t = chld_out.line[i];
+        if ((strcasestr( t, ex )) == t) {
+          t += strlen( ex );
+          if (strstr( t, ". " ) == t) {
+            result = STATE_OK;
+            msg = chld_out.line[i];
+            break;
+          }
+        }
+
+        t = tt; /* consider the right-side token, does it match ex? */
+        if ( (!exact && strcasestr( t, ex )) || (strcmp( t, ex ) == 0) ) {
+          result = STATE_OK;
+          msg = chld_out.line[i];
           break;
         }
       }
@@ -204,6 +226,7 @@ process_arguments (int argc, char **argv)
     {"verbose", no_argument, 0, 'v'},
     {"version", no_argument, 0, 'V'},
     {"help", no_argument, 0, 'h'},
+    {"exact", no_argument, 0, 'e'},
     {"record_type", required_argument, 0, 'T'},
     {"expected_address", required_argument, 0, 'a'},
     {"port", required_argument, 0, 'p'},
@@ -216,7 +239,7 @@ process_arguments (int argc, char **argv)
     return ERROR;
 
   while (1) {
-    c = getopt_long (argc, argv, "hVvt:l:H:w:c:T:p:a:A:46r:", longopts, &option);
+    c = getopt_long (argc, argv, "hVvt:l:H:w:c:T:p:a:A:46r:e", longopts, &option);
 
     if (c == -1 || c == EOF)
       break;
@@ -275,6 +298,9 @@ process_arguments (int argc, char **argv)
       break;
     case 'v':                 /* verbose */
       verbose = TRUE;
+      break;
+    case 'e':
+      exact = TRUE;
       break;
     case 'T':
       record_type = optarg;
@@ -362,6 +388,8 @@ print_help (void)
   printf ("    %s\n",_("Pass STRING as argument(s) to dig"));
   printf (" %s\n","-r, --retries=INTEGER");
   printf ("    %s\n",_("Number of retries passed to dig, timeout is divided by this value (Default: 3)"));
+  printf (" %s\n","-e, --exact");
+  printf ("    %s\n",_("Match records exactly. If not set, fuzzy matches."));
   printf (UT_WARN_CRIT);
   printf (UT_CONN_TIMEOUT, DEFAULT_SOCKET_TIMEOUT);
   printf (UT_VERBOSE);

@@ -64,6 +64,7 @@ main (int argc, char **argv)
 	int procuid = 0;
 	int procpid = 0;
 	int procppid = 0;
+	int procjid = 0;
 	int procvsz = 0;
 	int procrss = 0;
 	char proc_cgroup_hierarchy[MAX_INPUT_BUFFER];
@@ -160,7 +161,7 @@ main (int argc, char **argv)
 
 	/* If we get anything on stderr, at least set warning */
 	if(chld_err.buflen)
-		result = max_state (result, STATE_WARNING);
+		(void)max_state (result, STATE_WARNING);
 
 	/* reset the alarm handler */
 	alarm (0);

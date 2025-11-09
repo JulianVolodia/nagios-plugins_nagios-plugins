@@ -44,7 +44,7 @@ my @perf_data = sort(split(/ /, $result->perf_output));
 # Calculate avg_free free on mountpoint1 and mountpoint2
 # because if you check in the middle, you should get different errors
 $_ = $result->output;
-my ($free_on_mp1, $free_on_mp2) = (m/\((\d+)%.*\((\d+)%/);
+my ($free_on_mp1, $free_on_mp2) = (m/\((\d+\.\d\d)%.*\((\d+\.\d\d)%/);
 die "Cannot parse output: $_" unless ($free_on_mp1 && $free_on_mp2);
 my $avg_free = ceil(($free_on_mp1+$free_on_mp2)/2);
 my ($more_free, $less_free);
@@ -111,15 +111,15 @@ is_deeply( \@perf_data, \@_, "perf data for both filesystems same when reversed"
 
 # Basic filesystem checks for sizes
 $result = NPTest->testCmd( "./check_disk -w 1 -c 1 -p $more_free" );
-cmp_ok( $result->return_code, '==', 0, "At least 1 MB available on $more_free");
+cmp_ok( $result->return_code, '==', 0, "At least 1 MiB available on $more_free");
 like  ( $result->output, $successOutput, "OK output" );
 like  ( $result->only_output, qr/free space/, "Have free space text");
 like  ( $result->only_output, qr/$more_free/, "Have disk name in text");
 
 $result = NPTest->testCmd( "./check_disk -w 1 -c 1 -p $more_free -p $less_free" );
-cmp_ok( $result->return_code, '==', 0, "At least 1 MB available on $more_free and $less_free");
+cmp_ok( $result->return_code, '==', 0, "At least 1 MiB available on $more_free and $less_free");
 $_ = $result->output;
-my ($free_mb_on_mp1, $free_mb_on_mp2) = (m/(\d+) MB .* (\d+) MB /g);
+my ($free_mb_on_mp1, $free_mb_on_mp2) = (m/(\d+) MiB .* (\d+) MiB /g);
 my $free_mb_on_all = $free_mb_on_mp1 + $free_mb_on_mp2;
 
 
@@ -329,15 +329,15 @@ cmp_ok( $result->return_code, '==', 3, "Invalid options: -p must come after grou
 $result = NPTest->testCmd( "./check_disk -w 1 -c 1 -r '('" );
 cmp_ok( $result->return_code, '==', 3, "Exit UNKNOWN if regex is not compileable");
 
-# ignore: exit unknown, if all pathes are deselected using -i
+# ignore: exit unknown, if all paths are deselected using -i
 $result = NPTest->testCmd( "./check_disk -w 0% -c 0% -p $mountpoint_valid -p $mountpoint2_valid -i '$mountpoint_valid' -i '$mountpoint2_valid'" );
 cmp_ok( $result->return_code, '==', 3, "ignore-ereg: Unknown if all fs are ignored (case sensitive)");
 
-# ignore: exit unknown, if all pathes are deselected using -I
+# ignore: exit unknown, if all paths are deselected using -I
 $result = NPTest->testCmd( "./check_disk -w 0% -c 0% -p $mountpoint_valid -p $mountpoint2_valid -I '".uc($mountpoint_valid)."' -I '".uc($mountpoint2_valid)."'" );
 cmp_ok( $result->return_code, '==', 3, "ignore-ereg: Unknown if all fs are ignored (case insensitive)");
 
-# ignore: exit unknown, if all pathes are deselected using -i
+# ignore: exit unknown, if all paths are deselected using -i
 $result = NPTest->testCmd( "./check_disk -w 0% -c 0% -p $mountpoint_valid -p $mountpoint2_valid -i '.*'" );
 cmp_ok( $result->return_code, '==', 3, "ignore-ereg: Unknown if all fs are ignored using -i '.*'");
 
@@ -346,7 +346,7 @@ $result = NPTest->testCmd( "./check_disk -w 0% -c 0% -p $mountpoint_valid -p $mo
 like( $result->output, qr/$mountpoint_valid/, "output data does have $mountpoint_valid in it");
 unlike( $result->output, qr/$mountpoint2_valid/, "output data does not have $mountpoint2_valid in it");
 
-# ignore: test if all pathes are listed when ignore regex doesn't match
+# ignore: test if all paths are listed when ignore regex doesn't match
 $result = NPTest->testCmd( "./check_disk -w 0% -c 0% -p $mountpoint_valid -p $mountpoint2_valid -i '^barbazJodsf\$'");
 like( $result->output, qr/$mountpoint_valid/, "ignore: output data does have $mountpoint_valid when regex doesn't match");
 like( $result->output, qr/$mountpoint2_valid/,"ignore: output data does have $mountpoint2_valid when regex doesn't match");

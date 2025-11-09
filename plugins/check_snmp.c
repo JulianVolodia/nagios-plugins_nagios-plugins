@@ -3,7 +3,7 @@
 * Nagios check_snmp plugin
 *
 * License: GPL
-* Copyright (c) 1999-2014 Nagios Plugins Development Team
+* Copyright (c) 1999-2018 Nagios Plugins Development Team
 *
 * Description:
 *
@@ -29,7 +29,7 @@
 *****************************************************************************/
 
 const char *progname = "check_snmp";
-const char *copyright = "1999-2014";
+const char *copyright = "1999-2018";
 const char *email = "devel@nagios-plugins.org";
 
 #include "common.h"
@@ -64,6 +64,8 @@ const char *email = "devel@nagios-plugins.org";
 #define L_RATE_MULTIPLIER CHAR_MAX+2
 #define L_INVERT_SEARCH CHAR_MAX+3
 #define L_OFFSET CHAR_MAX+4
+#define STRICT_MODE CHAR_MAX+5
+#define L_MULTIPLIER CHAR_MAX+6
 
 /* Gobble to string - stop incrementing c when c[0] match one of the
  * characters in s */
@@ -92,6 +94,7 @@ void print_usage (void);
 void print_help (void);
 
 #include "regex.h"
+#include <ctype.h>
 char regex_expect[MAX_INPUT_BUFFER] = "";
 regex_t preg;
 regmatch_t pmatch[10];
@@ -146,7 +149,9 @@ char *output_delim;
 char *miblist = NULL;
 int needmibs = FALSE;
 int calculate_rate = 0;
+static int strict_mode = 0;
 double offset = 0.0;
+double multiplier = 1.0;
 int rate_multiplier = 1;
 state_data *previous_state;
 double *previous_value;
@@ -178,7 +183,7 @@ static char *fix_snmp_range(char *th)
 int
 main (int argc, char **argv)
 {
-	int i, len, line, total_oids;
+	int i, j, len, line, total_oids;
 	unsigned int bk_count = 0, dq_count = 0;
 	int iresult = STATE_UNKNOWN;
 	int result = STATE_UNKNOWN;
@@ -199,7 +204,7 @@ main (int argc, char **argv)
 	char *previous_string=NULL;
 	char *ap=NULL;
 	char *state_string=NULL;
-	size_t response_length, current_length, string_length;
+	size_t response_length, current_length, string_length, show_length;
 	char *temp_string=NULL;
 	char *quote_string=NULL;
 	time_t current_time;
@@ -258,7 +263,7 @@ main (int argc, char **argv)
 			previous_string = strdup((char *) previous_state->data);
 			while((ap = strsep(&previous_string, ":")) != NULL) {
 				if(verbose>2)
-					printf("State for %d=%s\n", i, ap);
+					printf("Previous State for %d=%s\n", i, ap);
 				while (i >= previous_size) {
 					previous_size += OID_COUNT_STEP;
 					previous_value = realloc(previous_value, previous_size * sizeof(*previous_value));
@@ -288,6 +293,7 @@ main (int argc, char **argv)
 		set_thresholds(&thlds[i],
 		               w ? strpbrk(w, NP_THRESHOLDS_CHARS) : NULL,
 		               c ? strpbrk(c, NP_THRESHOLDS_CHARS) : NULL);
+
 		if (w) {
 			th_warn=strchr(th_warn, ',');
 			if (th_warn) th_warn++;
@@ -332,7 +338,7 @@ main (int argc, char **argv)
 
 	/* This is just for display purposes, so it can remain a string */
 	xasprintf(&cl_hidden_auth, "%s -Le -t %d -r %d -m %s -v %s %s %s %s:%s",
-		snmpcmd, timeout_interval, retries, strlen(miblist) ? miblist : "''", proto, "[context]", "[authpriv]",
+		snmpcmd, command_interval, retries, strlen(miblist) ? miblist : "''", proto, "[context]", "[authpriv]",
 		server_address, port);
 
 	for (i = 0; i < numoids; i++) {
@@ -407,10 +413,15 @@ main (int argc, char **argv)
 			printf("Processing oid %i (line %i)\n  oidname: %s\n  response: %s\n", i+1, line+1, oidname, response);
 		}
 
+		if (strict_mode && strncmp(oids[i], oidname, strlen(oids[i]))) {
+			die( STATE_UNKNOWN, _("UNKNOWN - Expected OID %s did not match actual OID %s.\n"), oids[i], oidname);
+		}
+
 		/* Clean up type array - Sol10 does not necessarily zero it out */
 		bzero(type, sizeof(type));
 
 		is_counter=0;
+		is_ticks = 0;
 		/* We strip out the datatype indicator for PHBs */
 		if (strstr (response, "Gauge: ")) {
 			show = strstr (response, "Gauge: ") + 7;
@@ -475,25 +486,40 @@ main (int argc, char **argv)
 		}
 		else if (strstr (response, "Timeticks: ")) {
 			show = strstr (response, "Timeticks: ");
-			show = strpbrk (show, "-0123456789");
 			is_ticks = 1;
 		}
-		else
-			show = response + 3;
-
+		else if (strstr (response, "IpAddress: ")) {
+			show = strstr (response, "IpAddress: ") + 11;
+		}
+		else {
+			/* This branch is expected to be error-handling only */
+			show = response;
+			show_length = strlen(show);
+			for (j = 0; j < show_length; j++){
+				if (isspace(show[j])){
+					die (STATE_UNKNOWN,_("Unrecognized OID name returned (%s)\n"), show);
+				}
+			}
+		}
 		iresult = STATE_DEPENDENT;
 
 		/* Process this block for numeric comparisons */
 		/* Make some special values,like Timeticks numeric only if a threshold is defined */
-		if (thlds[i]->warning || thlds[i]->critical || calculate_rate || is_ticks || offset != 0.0) {
-			ptr = strpbrk (show, "-0123456789");
-			if (ptr == NULL)
+		if (thlds[i]->warning || thlds[i]->critical || calculate_rate || is_ticks || offset != 0.0 || multiplier != 1.0) {
+			/* Find the first instance of the '(' character - the value of the OID should be contained in parens */
+			if ((ptr = strpbrk(show, "(")) != NULL) { /* Timetick */
+				ptr++;
+			} else if ((ptr = strpbrk(show, "-0123456789")) == NULL) { /* Counter, gauge, or integer */
 				die (STATE_UNKNOWN,_("No valid data returned (%s)\n"), show);
+			}
+
 			while (i >= response_size) {
 				response_size += OID_COUNT_STEP;
 				response_value = realloc(response_value, response_size * sizeof(*response_value));
 			}
 			response_value[i] = strtod (ptr, NULL) + offset;
+			// This defaults to 1.0 so it's safe to multiply
+			response_value[i] *= multiplier;
 
 			if(calculate_rate) {
 				if (previous_state!=NULL) {
@@ -515,7 +541,12 @@ main (int argc, char **argv)
 				}
 			} else {
 				iresult = get_status(response_value[i], thlds[i]);
-				xasprintf (&show, conv, response_value[i]);
+				if(is_ticks) {
+					xasprintf (&show, "%s", response);
+				}
+				else { 
+					xasprintf (&show, conv, response_value[i]);
+				}
 			}
 		}
 
@@ -556,7 +587,7 @@ main (int argc, char **argv)
 
 		/* Result is the worst outcome of all the OIDs tested */
 		result = max_state (result, iresult);
-
+		
 		/* Prepend a label for this OID if there is one */
 		if (nlabels >= (size_t)1 && (size_t)i < nlabels && labels[i] != NULL)
 			xasprintf (&outbuff, "%s%s%s %s%s%s", outbuff,
@@ -569,66 +600,105 @@ main (int argc, char **argv)
 		/* Append a unit string for this OID if there is one */
 		if (nunits > (size_t)0 && (size_t)i < nunits && unitv[i] != NULL)
 			xasprintf (&outbuff, "%s %s", outbuff, unitv[i]);
-
+		
 		/* Write perfdata with whatever can be parsed by strtod, if possible */
 		ptr = NULL;
+		if(is_ticks) {
+			show = strstr (response, "Timeticks: ");
+			show = strpbrk (show, "-0123456789");
+		}
 		strtod(show, &ptr);
 		if (ptr > show) {
-			if (perf_labels && nlabels >= (size_t)1 && (size_t)i < nlabels && labels[i] != NULL)
-				temp_string=labels[i];
-			else
-				temp_string=oidname;
-			if (strpbrk (temp_string, " ='\"") == NULL) {
-				strncat(perfstr, temp_string, sizeof(perfstr)-strlen(perfstr)-1);
+
+			/* use either specified label or oid as label */
+			if (perf_labels 
+				&& (nlabels >= (size_t)1) 
+				&& ((size_t)i < nlabels) 
+				&& labels[i] != NULL) {
+
+					temp_string=labels[i];
+			}
+			else {
+				temp_string = oidname;
+			}
+
+			/* check the label for space, equal, singlequote or doublequote */
+			if (strpbrk(temp_string, " ='\"") == NULL) {
+
+				/* if it doesn't have any - we can just use it as the label */
+				strncat(perfstr, temp_string, sizeof(perfstr) - strlen(perfstr) - 1);
+
 			} else {
-				if (strpbrk (temp_string, "'") == NULL) {
+
+				/* if it does have one of those characters, we need
+				   to find a way to adequately quote it */
+				if (strpbrk(temp_string, "'") == NULL) {
 					quote_string="'";
 				} else {
 					quote_string="\"";
 				}
-				strncat(perfstr, quote_string, sizeof(perfstr)-strlen(perfstr)-1);
-				strncat(perfstr, temp_string, sizeof(perfstr)-strlen(perfstr)-1);
-				strncat(perfstr, quote_string, sizeof(perfstr)-strlen(perfstr)-1);
-			}
-			strncat(perfstr, "=", sizeof(perfstr)-strlen(perfstr)-1);
-			len = sizeof(perfstr)-strlen(perfstr)-1;
-			strncat(perfstr, show, len>ptr-show ? ptr-show : len);
 
-			if (warning_thresholds) {
-				strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
-				strncat(perfstr, warning_thresholds, sizeof(perfstr)-strlen(perfstr)-1);
+				strncat(perfstr, quote_string, sizeof(perfstr) - strlen(perfstr) - 1);
+				strncat(perfstr, temp_string, sizeof(perfstr) - strlen(perfstr) - 1);
+				strncat(perfstr, quote_string, sizeof(perfstr) - strlen(perfstr) - 1);
 			}
 
-			if (critical_thresholds) {
-				if (!warning_thresholds) strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
-				strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
-				strncat(perfstr, critical_thresholds, sizeof(perfstr)-strlen(perfstr)-1);
+			/* append the equal */
+			strncat(perfstr, "=", sizeof(perfstr) - strlen(perfstr) - 1);
+			len = sizeof(perfstr) - strlen(perfstr) - 1;
+
+			/* and then the data itself from the response */
+			strncat(perfstr, show, (len > ptr - show) ? ptr - show : len);
+
+			/* now append the unit of measurement */
+			if ((nunits > (size_t)0) 
+				&& ((size_t)i < nunits) 
+				&& (unitv[i] != NULL)) {
+
+					xasprintf(&temp_string, "%s", unitv[i]);
+					strncat(perfstr, temp_string, sizeof(perfstr) - strlen(perfstr) - 1);
 			}
 
-			if (type)
-				strncat(perfstr, type, sizeof(perfstr)-strlen(perfstr)-1);
-			if (nunits > (size_t)0 && (size_t)i < nunits && unitv[i] != NULL) {
-				xasprintf (&temp_string, "%s", unitv[i]);
-				strncat(perfstr, temp_string, sizeof(perfstr)-strlen(perfstr)-1);
-				}
+			/* and the type, if any */
+			if (type) {
+				strncat(perfstr, type, sizeof(perfstr) - strlen(perfstr) - 1);
+			}
 
-
+			/* add warn/crit to perfdata */
 			if (thlds[i]->warning || thlds[i]->critical) {
-				strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
-				if (thlds[i]->warning) {
-					xasprintf (&temp_string, "%.0f", thlds[i]->warning->end);
-					strncat(perfstr, temp_string, sizeof(perfstr)-strlen(perfstr)-1);
+
+				strncat(perfstr, ";", sizeof(perfstr) - strlen(perfstr) - 1);
+
+				/* print the warning string if it exists */
+				if (thlds[i]->warning_string) {
+
+					xasprintf(&temp_string, "%s", thlds[i]->warning_string);
+					strncat(perfstr, temp_string, sizeof(perfstr) - strlen(perfstr) - 1);
 				}
 				strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
-				if (thlds[i]->critical) {
-					xasprintf (&temp_string, "%.0f", thlds[i]->critical->end);
-					strncat(perfstr, temp_string, sizeof(perfstr)-strlen(perfstr)-1);
+
+				/* print the critical string if it exists */
+				if (thlds[i]->critical_string) {
+
+					xasprintf(&temp_string, "%s", thlds[i]->critical_string);
+					strncat(perfstr, temp_string, sizeof(perfstr) - strlen(perfstr) - 1);
 				}
-				strncat(perfstr, ";", sizeof(perfstr)-strlen(perfstr)-1);
+				strncat(perfstr, ";", sizeof(perfstr) - strlen(perfstr) - 1);
 			}
-			strncat(perfstr, " ", sizeof(perfstr)-strlen(perfstr)-1);
+
+			/* remove trailing semi-colons for guideline adherence */
+			len = strlen(perfstr) - 1;
+			if (perfstr[len] == ';') {
+				perfstr[len] = '\0';
+			}
+
+			/* we do not add any min/max value */
+
+			strncat(perfstr, " ", sizeof(perfstr) - strlen(perfstr) - 1);
 		}
-	}
+
+	} /* for (line=0, i=0; line < chld_out.lines; line++, i++) */
+	
 	total_oids=i;
 
 	/* Save state data, as all data collected now */
@@ -667,7 +737,7 @@ main (int argc, char **argv)
 			die( STATE_OK, _("No previous data to calculate rate - assume okay" ) );
 		}
 	}
-
+	
 	printf ("%s %s -%s %s\n", label, state_text (result), outbuff, perfstr);
 	if (mult_resp) printf ("%s", mult_resp);
 
@@ -711,9 +781,11 @@ process_arguments (int argc, char **argv)
 		{"authpasswd", required_argument, 0, 'A'},
 		{"privpasswd", required_argument, 0, 'X'},
 		{"next", no_argument, 0, 'n'},
+		{"strict", no_argument, 0, STRICT_MODE},
 		{"rate", no_argument, 0, L_CALCULATE_RATE},
 		{"rate-multiplier", required_argument, 0, L_RATE_MULTIPLIER},
 		{"offset", required_argument, 0, L_OFFSET},
+		{"multiplier", required_argument, 0, L_MULTIPLIER},
 		{"invert-search", no_argument, 0, L_INVERT_SEARCH},
 		{"perf-oids", no_argument, 0, 'O'},
 		{"ipv4", no_argument, 0, '4'},
@@ -735,7 +807,7 @@ process_arguments (int argc, char **argv)
 	}
 
 	while (1) {
-		c = getopt_long (argc, argv, "nhvVOt:c:w:H:C:o:e:E:d:D:s:t:R:r:l:u:p:m:P:N:L:U:a:x:A:X:",
+		c = getopt_long (argc, argv, "nhvVO46t:c:w:H:C:o:e:E:d:D:s:t:R:r:l:u:p:m:P:N:L:U:a:x:A:X:",
 									 longopts, &option);
 
 		if (c == -1 || c == EOF)
@@ -938,6 +1010,9 @@ process_arguments (int argc, char **argv)
 					unitv[nunits - 1] = ptr;
 			}
 			break;
+		case STRICT_MODE:
+			strict_mode = 1;
+			break;
 		case L_CALCULATE_RATE:
 			if(calculate_rate==0)
 				np_enable_state(NULL, 1);
@@ -949,6 +1024,10 @@ process_arguments (int argc, char **argv)
 			break;
 		case L_OFFSET:
                         offset=strtod(optarg,NULL);
+			break;
+		case L_MULTIPLIER:
+			multiplier=strtod(optarg,NULL);
+
 			break;
 		case L_INVERT_SEARCH:
 			invert_search=1;
@@ -1001,9 +1080,13 @@ validate_arguments ()
 {
 	/* check whether to load locally installed MIBS (CPU/disk intensive) */
 	if (miblist == NULL) {
-		if ( needmibs == TRUE ) {
+		if ( strict_mode == TRUE ) {
+			miblist = "";
+		}
+		else if ( needmibs == TRUE ) {
 			miblist = strdup (DEFAULT_MIBLIST);
-		}else{
+		}
+		else {
 			miblist = "";			/* don't read any mib files for numeric oids */
 		}
 	}
@@ -1192,7 +1275,7 @@ print_help (void)
 	printf ("(%s \"%s\")\n", _("default is") ,DEFAULT_COMMUNITY);
 	printf (" %s\n", "-U, --secname=USERNAME");
 	printf ("    %s\n", _("SNMPv3 username"));
-	printf (" %s\n", "-A, --authpassword=PASSWORD");
+	printf (" %s\n", "-A, --authpasswd=PASSWORD");
 	printf ("    %s\n", _("SNMPv3 authentication password"));
 	printf (" %s\n", "-X, --privpasswd=PASSWORD");
 	printf ("    %s\n", _("SNMPv3 privacy password"));
@@ -1218,7 +1301,9 @@ print_help (void)
 	printf (" %s\n", "--rate-multiplier");
 	printf ("    %s\n", _("Converts rate per second. For example, set to 60 to convert to per minute"));
 	printf (" %s\n", "--offset=OFFSET");
-	printf ("    %s\n", _("Add/substract the specified OFFSET to numeric sensor data"));
+	printf ("    %s\n", _("Add/subtract the specified OFFSET to numeric sensor data"));
+	printf (" %s\n", "--multiplier=MULTIPLIER");
+	printf ("    %s\n", _("Multiply the numeric sensor data by MULTIPLIER before doing comparisons"));
 
 	/* Tests Against Strings */
 	printf (" %s\n", "-s, --string=STRING");
@@ -1244,6 +1329,9 @@ print_help (void)
 
 	printf (" %s\n", "-O, --perf-oids");
 	printf ("    %s\n", _("Label performance data with OIDs instead of --label's"));
+	printf (" %s\n", "--strict");
+	printf ("    %s\n", _("Enable strict mode: arguments to -o will be checked against the OID"));
+	printf ("    %s\n", _("returned by snmpget. If they don't match, the plugin returns UNKNOWN."));
 
 	printf (UT_VERBOSE);
 
@@ -1287,5 +1375,5 @@ print_usage (void)
 	printf ("[-C community] [-s string] [-r regex] [-R regexi] [-t timeout] [-e retries]\n");
 	printf ("[-l label] [-u units] [-p port-number] [-d delimiter] [-D output-delimiter]\n");
 	printf ("[-m miblist] [-P snmp version] [-N context] [-L seclevel] [-U secname]\n");
-	printf ("[-a authproto] [-A authpasswd] [-x privproto] [-X privpasswd]\n");
+	printf ("[-a authproto] [-A authpasswd] [-x privproto] [-X privpasswd] [--strict]\n");
 }

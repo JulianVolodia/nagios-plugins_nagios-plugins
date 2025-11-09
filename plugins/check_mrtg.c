@@ -148,7 +148,7 @@ main (int argc, char **argv)
 	else if (rate > value_warning_threshold)
 		result = STATE_WARNING;
 
-	printf("%s. %s = %lu %s|%s\n",
+	printf("%s - %s. %s = %lu %s|%s\n", state_text(result),
 	       (use_average == TRUE) ? _("Avg") : _("Max"),
 	       label, rate, units,
 	       perfdata(label, (long) rate, units,
@@ -356,7 +356,7 @@ print_help (void)
 	printf (" %s\n", _("This plugin is useful for monitoring MRTG data that does not correspond to"));
   printf (" %s\n", _("bandwidth usage.  (Use the check_mrtgtraf plugin for monitoring bandwidth)."));
   printf (" %s\n", _("It can be used to monitor any kind of data that MRTG is monitoring - errors,"));
-  printf (" %s\n", _("packets/sec, etc.  I use MRTG in conjuction with the Novell NLM that allows"));
+  printf (" %s\n", _("packets/sec, etc.  I use MRTG in conjunction with the Novell NLM that allows"));
   printf (" %s\n", _("me to track processor utilization, user connections, drive space, etc and"));
   printf (" %s\n\n", _("this plugin works well for monitoring that kind of data as well."));
 

@@ -164,18 +164,22 @@ _set_thresholds(thresholds **my_thresholds, char *warn_string, char *critical_st
 
 	temp_thresholds->warning = NULL;
 	temp_thresholds->critical = NULL;
+	temp_thresholds->warning_string = NULL;
+	temp_thresholds->critical_string = NULL;
 
 	if (warn_string) {
 		if (!(temp_thresholds->warning = parse_range_string(warn_string))) {
 			free(temp_thresholds);
 			return NP_RANGE_UNPARSEABLE;
 		}
+		temp_thresholds->warning_string = strdup(warn_string);
 	}
 	if (critical_string) {
 		if (!(temp_thresholds->critical = parse_range_string(critical_string))) {
 			free(temp_thresholds);
 			return NP_RANGE_UNPARSEABLE;
 		}
+		temp_thresholds->critical_string = strdup(critical_string);
 	}
 
 	*my_thresholds = temp_thresholds;
@@ -204,11 +208,17 @@ void print_thresholds(const char *threshold_name, thresholds *my_threshold) {
 	} else {
 		if (my_threshold->warning) {
 			printf("Warning: start=%g end=%g; ", my_threshold->warning->start, my_threshold->warning->end);
+			if (my_threshold->warning_string) {
+				printf("Warning String: %s; ", my_threshold->warning_string);
+			}
 		} else {
 			printf("Warning not set; ");
 		}
 		if (my_threshold->critical) {
 			printf("Critical: start=%g end=%g", my_threshold->critical->start, my_threshold->critical->end);
+			if (my_threshold->critical_string) {
+				printf("Critical String: %s; ", my_threshold->critical_string);
+			}
 		} else {
 			printf("Critical not set");
 		}
@@ -322,23 +332,24 @@ int np_warn_if_not_root(void) {
 char *np_extract_value(const char *varlist, const char *name, char sep) {
 	char *tmp=NULL, *value=NULL;
 	int i;
+	size_t varlistlen;
 
 	while (1) {
 		/* Strip any leading space */
-		for (varlist; isspace(varlist[0]); varlist++);
+		for (; isspace(varlist[0]); varlist++);
 
 		if (!strncmp(name, varlist, strlen(name))) {
 			varlist += strlen(name);
 			/* strip trailing spaces */
-			for (varlist; isspace(varlist[0]); varlist++);
+			for (; isspace(varlist[0]); varlist++);
 
 			if (varlist[0] == '=') {
 				/* We matched the key, go past the = sign */
 				varlist++;
 				/* strip leading spaces */
-				for (varlist; isspace(varlist[0]); varlist++);
+				for (; isspace(varlist[0]); varlist++);
 
-				if (tmp = index(varlist, sep)) {
+				if ((tmp = index(varlist, sep))) {
 					/* Value is delimited by a comma */
 					if (tmp-varlist == 0) continue;
 					value = (char *)calloc(1, tmp-varlist+1);
@@ -346,15 +357,16 @@ char *np_extract_value(const char *varlist, const char *name, char sep) {
 					value[tmp-varlist] = '\0';
 				} else {
 					/* Value is delimited by a \0 */
-					if (!strlen(varlist)) continue;
-					value = (char *)calloc(1, strlen(varlist) + 1);
-					strncpy(value, varlist, strlen(varlist));
-					value[strlen(varlist)] = '\0';
+					varlistlen = strlen(varlist);
+					if (!varlistlen) continue;
+					value = (char *)calloc(1, varlistlen + 1);
+					strncpy(value, varlist, varlistlen);
+					value[varlistlen] = '\0';
 				}
 				break;
 			}
 		}
-		if (tmp = index(varlist, sep)) {
+		if ((tmp = index(varlist, sep))) {
 			/* More keys, keep going... */
 			varlist = tmp + 1;
 		} else {
@@ -440,8 +452,8 @@ char* _np_state_calculate_location_prefix(){
 		env_dir = getenv("NAGIOS_PLUGIN_STATE_DIRECTORY");
 		if(env_dir && env_dir[0] != '\0')
 			return env_dir;
-		return NP_STATE_DIR_PREFIX;
 	}
+	return NP_STATE_DIR_PREFIX;
 }
 
 /*

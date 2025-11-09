@@ -124,7 +124,7 @@ main (int argc, char **argv)
 			SERVICE[i] = toupper(SERVICE[i]);
 	}
 
-	/* set up a resonable buffer at first (will be realloc()'ed if
+	/* set up a reasonable buffer at first (will be realloc()'ed if
 	 * user specifies other options) */
 	server_expect = calloc(sizeof(char *), 2);
 
@@ -248,8 +248,8 @@ main (int argc, char **argv)
 		}
 	}
 	if(result != STATE_OK){
-		np_net_ssl_cleanup();
 		if(sd) close(sd);
+		np_net_ssl_cleanup();
 		return result;
 	}
 #endif /* HAVE_SSL */
@@ -322,10 +322,10 @@ main (int argc, char **argv)
 	if (server_quit != NULL) {
 		my_send(server_quit, strlen(server_quit));
 	}
+	if (sd) close (sd);
 #ifdef HAVE_SSL
 	np_net_ssl_cleanup();
 #endif
-	if (sd) close (sd);
 
 	microsec = deltime (tv);
 	elapsed_time = (double)microsec / 1.0e6;
@@ -429,6 +429,7 @@ process_arguments (int argc, char **argv)
 		{"help", no_argument, 0, 'h'},
 		{"ssl", no_argument, 0, 'S'},
 		{"certificate", required_argument, 0, 'D'},
+		{"sni", required_argument, 0, 'N'},
 		{0, 0, 0, 0}
 	};
 

@@ -2,12 +2,16 @@
 tags
 cscope.out
 nbproject/
+.kdev4/
+plugins.kdev4
+plugins.project
 
 # In all paths
 NP-VERSION-FILE
 *.o
-*.swp
 *.rej
+*.swp
+*~
 
 # /
 /aclocal.m4
@@ -72,6 +76,7 @@ NP-VERSION-FILE
 /gl/getopt.h
 /gl/glthread/.deps
 /gl/glthread/.dirstamp
+/gl/inttypes.h
 /gl/langinfo.h
 /gl/libgnu.a
 /gl/locale.h
@@ -208,6 +213,7 @@ NP-VERSION-FILE
 /plugins/libnpcommon.a
 /plugins/negate
 /plugins/stamp-h*
+/plugins/remove_perfdata
 /plugins/urlize
 
 # /plugins/t/
@@ -247,8 +253,15 @@ NP-VERSION-FILE
 /plugins-scripts/check_oracle
 /plugins-scripts/check_rpc
 /plugins-scripts/check_sensors
+/plugins-scripts/check_ssl_validity
 /plugins-scripts/check_wave
 /plugins-scripts/check_file_age
+
+# /plugins-python
+/plugins-python/Makefile.in
+/plugins-python/Makefile
+plugins-python/*.py
+plugins-python/check_ncpa.py
 
 # /po/
 /po/Makefile
@@ -264,5 +277,6 @@ NP-VERSION-FILE
 /po/quot.sed
 /po/POTFILES
 /po/stamp-po
+/po/*~
 
 /tools/build_perl_modules
